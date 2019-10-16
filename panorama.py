@@ -259,9 +259,6 @@ def getBoundingCorners(corners_1, corners_2, homography):
 
     corners_1_out = cv2.perspectiveTransform(corners_1, homography)
 
-    # print("corners 1 - out")
-    # print(corners_1_out)
-
     corners = np.concatenate((corners_1_out,corners_2),axis=0)
 
     x_slice = corners[:,:,0:1]
@@ -275,9 +272,6 @@ def getBoundingCorners(corners_1, corners_2, homography):
 
     min_coord = np.array(([min_x,min_y]),dtype=np.float64)
     max_coord = np.array(([max_x, max_y]),dtype=np.float64)
-
-    # print("min_coord:", min_coord)
-    # print("max_coord:", max_coord)
 
     return min_coord, max_coord
 
@@ -355,13 +349,111 @@ def warpCanvas(image, homography, min_xy, max_xy):
 
     transform_matrix = np.dot(translation_matrix, homography)
 
-    print(canvas_size)
-
     # image_out = np.zeros(canvas_size).astype(np.uint8)
 
     image_out = cv2.warpPerspective(image, transform_matrix, dsize=canvas_size)
 
     return image_out
+
+def drawMatchesBetweenImages(image_1, kp_1, image_2, kp_2, matches):
+
+    # print(kp_1)
+    image_out = np.zeros_like(image_1)
+    image_out = cv2.drawMatches(image_1, kp_1, image_2, kp_2, matches, image_out)
+    cv2.imwrite("draw_matches_out.png", image_out)
+
+def cropPanoramaHeight(min_y, max_y, corners_1, corners_2, homography, panorama):
+
+    # print("orig corners",corners_1)
+
+    # prev_min_y = np.amin(corners_1[:,:,1:])
+    # prev_max_y = np.amax(corners_1[:,:,1:])
+
+    # diff_min_y = np.rint(np.absolute(prev_min_y - min_y)).astype(np.intc) + 1
+    # diff_max_y = np.rint(np.absolute(prev_max_y - max_y)).astype(np.intc) -1
+    # diff_max_y *= -1
+
+    # print("diff_min_y",diff_min_y)
+    # print("diff_max_y",diff_max_y)
+
+    # print(panorama.shape)
+
+    image_out = np.copy(panorama)
+
+    #Crop sides
+    corners_1_warped = cv2.perspectiveTransform(corners_1, homography)
+
+    left_crop = np.absolute(corners_1_warped[0][0][0] - corners_1_warped[1][0][0]).astype(np.intc)
+    image_out = image_out[:,left_crop:,:]
+
+    right_crop = np.absolute(corners_2[2][0][0] - corners_2[3][0][0]).astype(np.intc)
+    right_crop *= -1
+
+    if right_crop == 0:
+        image_out = image_out[:,:-1,:]
+    else:
+        image_out = image_out[:,:right_crop,:]
+
+    # print("left_crop",left_crop)
+    # print("right_crop",right_crop)
+
+    # cv2.imwrite("post_LR_crop.png",image_out
+
+
+    #Crop from the top     ##################################
+
+    max_crop = 0
+
+    for i in range(image_out.shape[1]):
+
+        if np.sum(image_out[0][i]) == 0:
+
+            crop_length = 0
+            for j in range(1,int(image_out.shape[0]/2)):
+                
+                if np.sum(image_out[j][i]) == 0:
+                    crop_length += 1
+                else:
+                    break
+
+            if max_crop < crop_length:
+                max_crop = crop_length
+
+    image_out = image_out[max_crop:,:,:]
+
+    print("top crop=",max_crop)
+
+    #Crop from the bottom     ##################################
+
+    max_crop = 0
+    
+    for i in range(image_out.shape[1]):
+
+        if np.sum(image_out[image_out.shape[0]-1][(image_out.shape[1]-1)-i]) == 0:
+
+            crop_length = 0
+            for j in range(1,int(image_out.shape[0]/2)):
+                
+                if np.sum(image_out[(image_out.shape[0]-1)-j][(image_out.shape[1]-1)-i]) == 0:
+                    crop_length += 1
+                else:
+                    break
+
+            if max_crop < crop_length:
+                max_crop = crop_length
+
+    max_crop *= -1
+
+    if max_crop < 0:
+        image_out = image_out[:max_crop,:,:]
+
+    print("bottom crop=",max_crop)
+
+    return image_out
+
+# def findMinSeam():
+
+
 
 def blendImagePair(image_1, image_2, num_matches):
     """This function takes two images as input and fits them onto a single
@@ -411,14 +503,24 @@ def blendImagePair(image_1, image_2, num_matches):
         process.
     """
     kp1, kp2, matches = findMatchesBetweenImages(image_1, image_2, num_matches)
+    # drawMatchesBetweenImages(image_1, kp1, image_2, kp2, matches)
     homography = findHomography(kp1, kp2, matches)
     corners_1 = getImageCorners(image_1)
     corners_2 = getImageCorners(image_2)
     min_xy, max_xy = getBoundingCorners(corners_1, corners_2, homography)
     output_image = warpCanvas(image_1, homography, min_xy, max_xy)
+
+    cv2.imwrite("warped_out.png",output_image)
+
+    print("min_xy",min_xy)
+    print("max_xy",max_xy)
+
+
     # WRITE YOUR CODE HERE - REPLACE THIS WITH YOUR BLENDING CODE
     min_xy = min_xy.astype(np.int)
     output_image[-min_xy[1]:-min_xy[1] + image_2.shape[0],-min_xy[0]:-min_xy[0] + image_2.shape[1]] = image_2
+    cv2.imwrite("pre_crop.png",output_image)
+    output_image = cropPanoramaHeight(min_xy[1], max_xy[1], corners_1, corners_2, homography, output_image)
 
     return output_image
     # return None
